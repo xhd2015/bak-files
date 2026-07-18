@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/xhd2015/bak-files/internal/config"
+	"github.com/xhd2015/bak-files/pathflag"
 )
 
 // Options control a backup or restore run.
@@ -20,6 +21,13 @@ type Options struct {
 	Verbose bool
 	// Log is used for informational messages (stdout/stderr of the CLI).
 	Log io.Writer
+
+	// NoDotFiles disables auto-discovery of top-level $HOME dots for this run.
+	NoDotFiles bool
+	// DotExclude are home-relative force-exclude prefixes (CLI ∪ config).
+	DotExclude []string
+	// DotInclude are home-relative force-include prefixes (CLI ∪ config).
+	DotInclude []string
 }
 
 // Job is one files entry resolved to source and mapping paths, plus hooks/cmds.
@@ -44,8 +52,9 @@ type Job struct {
 	GitPatch bool
 }
 
-// ResolveJobs expands config file entries into copy jobs (declaration order).
-func ResolveJobs(cfg *config.Config) ([]Job, error) {
+// ResolveJobs expands config file entries into copy jobs (declaration order),
+// then optionally merges auto-discovered top-level $HOME dots.
+func ResolveJobs(cfg *config.Config, opt Options) ([]Job, error) {
 	keys := cfg.FileKeys
 	if len(keys) == 0 && len(cfg.Files) > 0 {
 		for k := range cfg.Files {
@@ -108,7 +117,108 @@ func ResolveJobs(cfg *config.Config) ([]Job, error) {
 			GitPatch:      fields.GitPatch,
 		})
 	}
+
+	jobs, err := mergeDiscoveredDots(cfg, jobs, opt, globalEx)
+	if err != nil {
+		return nil, err
+	}
 	return jobs, nil
+}
+
+// MappingPaths returns mapping paths for explicit and discovered jobs (list).
+func MappingPaths(cfg *config.Config, opt Options) ([]string, error) {
+	jobs, err := ResolveJobs(cfg, opt)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(jobs))
+	for _, j := range jobs {
+		out = append(out, j.Mapping)
+	}
+	return out, nil
+}
+
+// mergeDiscoveredDots appends jobs for top-level $HOME dots not already covered
+// by an explicit job (same cleaned source path wins). Also discovers dots that
+// exist under the mapped backup home root (so restore/list see store-only dots).
+func mergeDiscoveredDots(cfg *config.Config, jobs []Job, opt Options, globalEx []string) ([]Job, error) {
+	if opt.NoDotFiles || !cfg.IncludeDotFilesEnabled() {
+		return jobs, nil
+	}
+	home := os.Getenv("HOME")
+	if home == "" {
+		return jobs, nil
+	}
+	home = filepath.Clean(home)
+
+	covered := make(map[string]struct{}, len(jobs))
+	for _, j := range jobs {
+		covered[filepath.Clean(j.Source)] = struct{}{}
+	}
+
+	addDot := func(name string) error {
+		if !strings.HasPrefix(name, ".") || name == "." || name == ".." {
+			return nil
+		}
+		src := filepath.Join(home, name)
+		if _, ok := covered[filepath.Clean(src)]; ok {
+			return nil // explicit (or prior discovery) wins
+		}
+		key := "~/" + name
+		mapping, err := cfg.MappingPathFor(key)
+		if err != nil {
+			return err
+		}
+		jobs = append(jobs, Job{
+			Key:      key,
+			Source:   src,
+			Mapping:  mapping,
+			Excludes: append([]string{}, globalEx...),
+		})
+		covered[filepath.Clean(src)] = struct{}{}
+		return nil
+	}
+
+	// 1) Live HOME top-level dots.
+	if entries, err := os.ReadDir(home); err == nil {
+		for _, e := range entries {
+			if err := addDot(e.Name()); err != nil {
+				return nil, err
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("read HOME for dot discovery: %w", err)
+	}
+
+	// 2) Backup-store top-level dots under mapped "~" (restore/list when dest absent).
+	if bakRoot, err := mappedHomeBackupRoot(cfg); err == nil && bakRoot != "" {
+		if entries, err := os.ReadDir(bakRoot); err == nil {
+			for _, e := range entries {
+				if err := addDot(e.Name()); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+
+	return jobs, nil
+}
+
+// mappedHomeBackupRoot returns targetDir/<mapping for "~"> when resolvable.
+func mappedHomeBackupRoot(cfg *config.Config) (string, error) {
+	mp, err := cfg.MappingPathFor("~")
+	if err != nil {
+		return "", err
+	}
+	if mp == "" || mp == "~" {
+		// No useful mapping.
+		return "", nil
+	}
+	targetDir := cfg.TargetDir
+	if targetDir == "" {
+		targetDir = "./files"
+	}
+	return filepath.Join(targetDir, filepath.FromSlash(mp)), nil
 }
 
 type entryFields struct {
@@ -210,7 +320,8 @@ func Backup(cfg *config.Config, opt Options) error {
 	if opt.Log == nil {
 		opt.Log = io.Discard
 	}
-	jobs, err := ResolveJobs(cfg)
+	opt = mergeDotFilters(cfg, opt)
+	jobs, err := ResolveJobs(cfg, opt)
 	if err != nil {
 		return err
 	}
@@ -271,6 +382,18 @@ func Backup(cfg *config.Config, opt Options) error {
 	return nil
 }
 
+func mergeDotFilters(cfg *config.Config, opt Options) Options {
+	var cfgInc, cfgExc []string
+	if cfg.Global != nil {
+		cfgInc = cfg.Global.DotIncludes
+		cfgExc = cfg.Global.DotExcludes
+	}
+	// CLI filters appended after config so both apply (union).
+	opt.DotInclude = append(append([]string{}, cfgInc...), opt.DotInclude...)
+	opt.DotExclude = append(append([]string{}, cfgExc...), opt.DotExclude...)
+	return opt
+}
+
 func dryRunBackupJob(job Job, dst string, opt Options) error {
 	if job.BeforeCopy != "" {
 		fmt.Fprintf(opt.Log, "dry-run: would run beforeCopy: %s\n", job.BeforeCopy)
@@ -288,11 +411,29 @@ func dryRunBackupJob(job Job, dst string, opt Options) error {
 				return fmt.Errorf("stat source %s: %w", src, err)
 			}
 		} else {
-			_ = info
-			if excluded(filepath.Base(src), job.Excludes) {
-				fmt.Fprintf(opt.Log, "INFO: skip excluded %s\n", src)
-			} else {
-				fmt.Fprintf(opt.Log, "dry-run: would copy %s -> %s\n", src, dst)
+			if info.Mode()&os.ModeSymlink != 0 {
+				info, err = os.Stat(src)
+				if err != nil {
+					if os.IsNotExist(err) {
+						fmt.Fprintf(opt.Log, "INFO: skip missing source %s\n", src)
+					} else {
+						return err
+					}
+					info = nil
+				}
+			}
+			if info != nil {
+				if info.IsDir() {
+					if err := dryRunWalk(src, dst, job.Excludes, opt, true); err != nil {
+						return err
+					}
+				} else {
+					if skip, reason := shouldSkipPath(src, job.Excludes, opt); skip {
+						logSkip(opt, src, reason)
+					} else {
+						fmt.Fprintf(opt.Log, "dry-run: would copy %s -> %s\n", src, dst)
+					}
+				}
 			}
 		}
 	}
@@ -300,6 +441,52 @@ func dryRunBackupJob(job Job, dst string, opt Options) error {
 		fmt.Fprintf(opt.Log, "dry-run: would run afterCopy: %s\n", job.AfterCopy)
 	}
 	return nil
+}
+
+// dryRunWalk walks srcDir logging would-copy / skip without writing.
+// backupSide: true → home-rel from source path; false → home-rel from dest path.
+func dryRunWalk(srcDir, dstDir string, excludes []string, opt Options, backupSide bool) error {
+	return filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(srcDir, path)
+		if err != nil {
+			return err
+		}
+		dst := filepath.Join(dstDir, rel)
+		if rel == "." {
+			// Root: evaluate skip on the directory itself.
+			checkPath := path
+			if !backupSide {
+				checkPath = dstDir
+			}
+			if skip, reason := shouldSkipPath(checkPath, excludes, opt); skip {
+				logSkip(opt, checkPath, reason)
+				return filepath.SkipDir
+			}
+			fmt.Fprintf(opt.Log, "dry-run: would ensure dir %s\n", dstDir)
+			return nil
+		}
+
+		checkPath := path
+		if !backupSide {
+			checkPath = dst
+		}
+		if skip, reason := shouldSkipPath(checkPath, excludes, opt); skip {
+			logSkip(opt, checkPath, reason)
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if info.IsDir() {
+			fmt.Fprintf(opt.Log, "dry-run: would ensure dir %s\n", dst)
+			return nil
+		}
+		fmt.Fprintf(opt.Log, "dry-run: would copy %s -> %s\n", path, dst)
+		return nil
+	})
 }
 
 // backupGitTree backs up a dirty git worktree into dst (excluding .git) and
@@ -327,7 +514,7 @@ func backupGitTree(job Job, dst string, opt Options) error {
 		}
 	}
 
-	if err := copyDir(src, dst, job.Excludes, opt); err != nil {
+	if err := copyDir(src, dst, job.Excludes, opt, true); err != nil {
 		return err
 	}
 
@@ -490,10 +677,10 @@ func backupCopySource(job Job, dst string, opt Options) error {
 		}
 	}
 	if info.IsDir() {
-		return copyDir(src, dst, job.Excludes, opt)
+		return copyDir(src, dst, job.Excludes, opt, true)
 	}
-	if excluded(filepath.Base(src), job.Excludes) {
-		fmt.Fprintf(opt.Log, "INFO: skip excluded %s\n", src)
+	if skip, reason := shouldSkipPath(src, job.Excludes, opt); skip {
+		logSkip(opt, src, reason)
 		return nil
 	}
 	return copyFile(src, dst, opt)
@@ -504,7 +691,8 @@ func Restore(cfg *config.Config, opt Options) error {
 	if opt.Log == nil {
 		opt.Log = io.Discard
 	}
-	jobs, err := ResolveJobs(cfg)
+	opt = mergeDotFilters(cfg, opt)
+	jobs, err := ResolveJobs(cfg, opt)
 	if err != nil {
 		return err
 	}
@@ -524,7 +712,6 @@ func Restore(cfg *config.Config, opt Options) error {
 			if job.RestoreCmd != "" {
 				fmt.Fprintf(opt.Log, "dry-run: would run restoreCmd: %s\n", job.RestoreCmd)
 			}
-			// Still log would-copy when backup exists (file restore alongside restoreCmd).
 			info, err := os.Lstat(bak)
 			if err != nil {
 				if os.IsNotExist(err) {
@@ -535,8 +722,33 @@ func Restore(cfg *config.Config, opt Options) error {
 					return fmt.Errorf("stat backup %s: %w", bak, err)
 				}
 			} else {
-				_ = info
-				fmt.Fprintf(opt.Log, "dry-run: would copy %s -> %s\n", bak, dst)
+				if info.Mode()&os.ModeSymlink != 0 {
+					info, err = os.Stat(bak)
+					if err != nil {
+						if os.IsNotExist(err) {
+							if job.RestoreCmd == "" {
+								fmt.Fprintf(opt.Log, "INFO: skip missing backup %s\n", bak)
+							}
+						} else {
+							return err
+						}
+						info = nil
+					}
+				}
+				if info != nil {
+					if info.IsDir() {
+						// Walk backup; home-rel evaluated from restore dest paths.
+						if err := dryRunWalk(bak, dst, job.Excludes, opt, false); err != nil {
+							return err
+						}
+					} else {
+						if skip, reason := shouldSkipPath(dst, job.Excludes, opt); skip {
+							logSkip(opt, dst, reason)
+						} else {
+							fmt.Fprintf(opt.Log, "dry-run: would copy %s -> %s\n", bak, dst)
+						}
+					}
+				}
 			}
 			continue
 		}
@@ -589,10 +801,10 @@ func restoreCopyBackup(job Job, bak, dst string, opt Options) error {
 		}
 	}
 	if info.IsDir() {
-		return copyDir(bak, dst, job.Excludes, opt)
+		return copyDir(bak, dst, job.Excludes, opt, false)
 	}
-	if excluded(filepath.Base(bak), job.Excludes) {
-		fmt.Fprintf(opt.Log, "INFO: skip excluded %s\n", bak)
+	if skip, reason := shouldSkipPath(dst, job.Excludes, opt); skip {
+		logSkip(opt, dst, reason)
 		return nil
 	}
 	return copyFile(bak, dst, opt)
@@ -648,7 +860,9 @@ func runCmdToFile(script, dst string, opt Options) error {
 	return nil
 }
 
-func copyDir(srcDir, dstDir string, excludes []string, opt Options) error {
+// copyDir walks srcDir → dstDir applying skip policy.
+// backupSide: true evaluates home-rel from source paths; false from dest paths.
+func copyDir(srcDir, dstDir string, excludes []string, opt Options, backupSide bool) error {
 	return filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -657,22 +871,34 @@ func copyDir(srcDir, dstDir string, excludes []string, opt Options) error {
 		if err != nil {
 			return err
 		}
+		dst := filepath.Join(dstDir, rel)
 		if rel == "." {
-			// Root directory itself.
+			checkPath := path
+			if !backupSide {
+				checkPath = dstDir
+			}
+			if skip, reason := shouldSkipPath(checkPath, excludes, opt); skip {
+				logSkip(opt, checkPath, reason)
+				return filepath.SkipDir
+			}
 			if opt.DryRun {
 				fmt.Fprintf(opt.Log, "dry-run: would ensure dir %s\n", dstDir)
 				return nil
 			}
 			return os.MkdirAll(dstDir, 0o755)
 		}
-		base := filepath.Base(path)
-		if excluded(base, excludes) {
+
+		checkPath := path
+		if !backupSide {
+			checkPath = dst
+		}
+		if skip, reason := shouldSkipPath(checkPath, excludes, opt); skip {
+			logSkip(opt, checkPath, reason)
 			if info.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		dst := filepath.Join(dstDir, rel)
 		if info.IsDir() {
 			if opt.DryRun {
 				fmt.Fprintf(opt.Log, "dry-run: would ensure dir %s\n", dst)
@@ -776,4 +1002,90 @@ func excluded(base string, patterns []string) bool {
 		}
 	}
 	return false
+}
+
+// shouldSkipPath applies the home walk skip policy when absPath is under $HOME;
+// otherwise only basename excludes apply.
+//
+// Policy (home-relative):
+//  1. force-include (keep; exclude still wins if both)
+//  2. force-exclude → skip
+//  3. pathflag DefaultSkipMask → skip
+//  4. basename/glob excludes → skip
+func shouldSkipPath(absPath string, basenameExcludes []string, opt Options) (bool, string) {
+	home := os.Getenv("HOME")
+	homeRel, underHome := relUnderHome(absPath, home)
+	if underHome {
+		inc := forcePrefixMatch(homeRel, opt.DotInclude)
+		exc := forcePrefixMatch(homeRel, opt.DotExclude)
+		if exc {
+			return true, "excluded"
+		}
+		if !inc {
+			res, err := pathflag.Classify(homeRel)
+			if err == nil && res.Flags&pathflag.DefaultSkipMask != 0 {
+				reason := res.Reason
+				if reason == "" {
+					reason = res.Flags.String()
+				}
+				return true, reason
+			}
+		}
+	}
+	base := filepath.Base(absPath)
+	if excluded(base, basenameExcludes) {
+		return true, "excluded"
+	}
+	return false, ""
+}
+
+func relUnderHome(absPath, home string) (string, bool) {
+	if home == "" {
+		return "", false
+	}
+	absPath = filepath.Clean(absPath)
+	home = filepath.Clean(home)
+	rel, err := filepath.Rel(home, absPath)
+	if err != nil {
+		return "", false
+	}
+	rel = filepath.ToSlash(rel)
+	if rel == ".." || strings.HasPrefix(rel, "../") {
+		return "", false
+	}
+	if rel == "." {
+		return "", false
+	}
+	return rel, true
+}
+
+func forcePrefixMatch(homeRel string, patterns []string) bool {
+	homeRel = strings.TrimPrefix(filepath.ToSlash(homeRel), "./")
+	for _, p := range patterns {
+		p = strings.TrimSpace(p)
+		p = strings.TrimPrefix(filepath.ToSlash(p), "./")
+		p = strings.TrimPrefix(p, "/")
+		if p == "" {
+			continue
+		}
+		if homeRel == p || strings.HasPrefix(homeRel, p+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func logSkip(opt Options, path, reason string) {
+	// Prefer home-relative path in the message when under HOME.
+	display := path
+	if home := os.Getenv("HOME"); home != "" {
+		if rel, ok := relUnderHome(path, home); ok {
+			display = rel
+		}
+	}
+	if reason != "" {
+		fmt.Fprintf(opt.Log, "INFO: skip %s (%s)\n", display, reason)
+	} else {
+		fmt.Fprintf(opt.Log, "INFO: skip %s\n", display)
+	}
 }

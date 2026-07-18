@@ -34,6 +34,20 @@ type ValidateRule struct {
 // GlobalConfig holds shared excludes etc.
 type GlobalConfig struct {
 	Excludes []string `json:"excludes"`
+	// IncludeDotFiles controls auto-discovery of top-level $HOME dots.
+	// nil/absent means enabled (default true).
+	IncludeDotFiles *bool    `json:"includeDotFiles"`
+	DotExcludes     []string `json:"dotExcludes"`
+	DotIncludes     []string `json:"dotIncludes"`
+}
+
+// IncludeDotFilesEnabled reports whether home top-level dot discovery is on.
+// Default is true when global is nil or includeDotFiles is absent.
+func (c *Config) IncludeDotFilesEnabled() bool {
+	if c == nil || c.Global == nil || c.Global.IncludeDotFiles == nil {
+		return true
+	}
+	return *c.Global.IncludeDotFiles
 }
 
 // Load reads and parses a bak.config JSON file, preserving files key order.
