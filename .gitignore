@@ -32,3 +32,4 @@ sum.index
 # Go workspace local
 go.work
 go.work.sum
+/external
