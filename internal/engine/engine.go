@@ -4,6 +4,7 @@ package engine
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -54,6 +55,14 @@ type Job struct {
 
 // ResolveJobs expands config file entries into copy jobs (declaration order),
 // then optionally merges auto-discovered top-level $HOME dots.
+//
+// ResolveJobs turns each files entry into one or more jobs.
+//
+// Any files key PREFIX whose value is a string array is a basename whitelist:
+// each name becomes a child job under expand(PREFIX) (Source=expand(PREFIX)/name,
+// mapping for PREFIX+"/name"). There is never a full-PREFIX job for array values.
+// Bare "~" with a non-array value is ignored (no Source=$HOME). Object/true
+// entries remain full-PREFIX jobs (with excludes/hooks), subject to home guards.
 func ResolveJobs(cfg *config.Config, opt Options) ([]Job, error) {
 	keys := cfg.FileKeys
 	if len(keys) == 0 && len(cfg.Files) > 0 {
@@ -67,6 +76,8 @@ func ResolveJobs(cfg *config.Config, opt Options) ([]Job, error) {
 		globalEx = append(globalEx, cfg.Global.Excludes...)
 	}
 
+	home := filepath.Clean(os.Getenv("HOME"))
+
 	var jobs []Job
 	for _, key := range keys {
 		val, ok := cfg.Files[key]
@@ -74,6 +85,49 @@ func ResolveJobs(cfg *config.Config, opt Options) ([]Job, error) {
 			continue
 		}
 		if b, isBool := val.(bool); isBool && !b {
+			continue
+		}
+
+		// String-array value: per-basename child jobs under PREFIX; never full PREFIX.
+		names, isArr, err := filesArrayWhitelist(val)
+		if err != nil {
+			return nil, err
+		}
+		if isArr {
+			for _, name := range names {
+				name = strings.TrimSpace(name)
+				if name == "" || name == "." || name == ".." {
+					continue
+				}
+				// Reject path separators — array entries are basenames only.
+				if strings.Contains(name, "/") || strings.Contains(name, string(filepath.Separator)) {
+					return nil, fmt.Errorf(`files %q whitelist entry must be a basename, got %q`, key, name)
+				}
+				childKey := joinFilesKey(key, name)
+				src, err := config.ExpandPath(childKey)
+				if err != nil {
+					return nil, err
+				}
+				// Hard guard: never schedule a full-home tree as a single copy job.
+				if home != "" && filepath.Clean(src) == home {
+					continue
+				}
+				mapping, err := cfg.MappingPathFor(childKey)
+				if err != nil {
+					return nil, err
+				}
+				jobs = append(jobs, Job{
+					Key:      childKey,
+					Source:   src,
+					Mapping:  mapping,
+					Excludes: append([]string{}, globalEx...),
+				})
+			}
+			continue
+		}
+
+		// Bare "~" with non-array value (true/map/etc.): never Source=$HOME.
+		if key == "~" {
 			continue
 		}
 
@@ -94,6 +148,10 @@ func ResolveJobs(cfg *config.Config, opt Options) ([]Job, error) {
 		src, err := config.ExpandPath(srcKey)
 		if err != nil {
 			return nil, err
+		}
+		// Hard guard: never schedule a full-home tree as a single copy job.
+		if home != "" && filepath.Clean(src) == home {
+			continue
 		}
 		mapping, err := cfg.MappingPathFor(key)
 		if err != nil {
@@ -122,7 +180,47 @@ func ResolveJobs(cfg *config.Config, opt Options) ([]Job, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Final guard against regression: drop any job whose source is bare HOME.
+	if home != "" {
+		filtered := jobs[:0]
+		for _, j := range jobs {
+			if filepath.Clean(j.Source) == home {
+				continue
+			}
+			filtered = append(filtered, j)
+		}
+		jobs = filtered
+	}
 	return jobs, nil
+}
+
+// joinFilesKey builds PREFIX/name for files keys (bare "~" → "~/name").
+func joinFilesKey(prefix, name string) string {
+	if prefix == "" || prefix == "~" {
+		return "~/" + name
+	}
+	return strings.TrimRight(prefix, "/") + "/" + name
+}
+
+// filesArrayWhitelist parses a files entry value when it is a string array
+// (basename whitelist under that key). isArr is false for non-array values.
+func filesArrayWhitelist(val any) (names []string, isArr bool, err error) {
+	switch v := val.(type) {
+	case []string:
+		return append([]string{}, v...), true, nil
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, e := range v {
+			s, ok := e.(string)
+			if !ok {
+				return nil, true, fmt.Errorf(`files whitelist entries must be strings, got %T`, e)
+			}
+			out = append(out, s)
+		}
+		return out, true, nil
+	default:
+		return nil, false, nil
+	}
 }
 
 // MappingPaths returns mapping paths for explicit and discovered jobs (list).
@@ -163,6 +261,12 @@ func mergeDiscoveredDots(cfg *config.Config, jobs []Job, opt Options, globalEx [
 		src := filepath.Join(home, name)
 		if _, ok := covered[filepath.Clean(src)]; ok {
 			return nil // explicit (or prior discovery) wins
+		}
+		// Do not schedule pathflag-skipped trees (e.g. .Trash) as jobs.
+		if skip, reason := shouldSkipPath(src, globalEx, opt); skip {
+			logSkip(opt, src, reason)
+			covered[filepath.Clean(src)] = struct{}{}
+			return nil
 		}
 		key := "~/" + name
 		mapping, err := cfg.MappingPathFor(key)
@@ -448,7 +552,7 @@ func dryRunBackupJob(job Job, dst string, opt Options) error {
 func dryRunWalk(srcDir, dstDir string, excludes []string, opt Options, backupSide bool) error {
 	return filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return err
+			return walkAccessErr(path, info, err, opt)
 		}
 		rel, err := filepath.Rel(srcDir, path)
 		if err != nil {
@@ -480,8 +584,16 @@ func dryRunWalk(srcDir, dstDir string, excludes []string, opt Options, backupSid
 			}
 			return nil
 		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			fmt.Fprintf(opt.Log, "dry-run: would symlink %s\n", dst)
+			return nil
+		}
 		if info.IsDir() {
 			fmt.Fprintf(opt.Log, "dry-run: would ensure dir %s\n", dst)
+			return nil
+		}
+		if reason, ok := specialFileSkipReason(info.Mode()); ok {
+			logSkip(opt, path, reason)
 			return nil
 		}
 		fmt.Fprintf(opt.Log, "dry-run: would copy %s -> %s\n", path, dst)
@@ -657,10 +769,18 @@ func writeBakStats(mappingKey, commitHash string, hasChange bool) error {
 
 func backupCopySource(job Job, dst string, opt Options) error {
 	src := job.Source
+	if skip, reason := shouldSkipPath(src, job.Excludes, opt); skip {
+		logSkip(opt, src, reason)
+		return nil
+	}
 	info, err := os.Lstat(src)
 	if err != nil {
 		if os.IsNotExist(err) {
 			fmt.Fprintf(opt.Log, "INFO: skip missing source %s\n", src)
+			return nil
+		}
+		if isAccessDenied(err) {
+			logWarn(opt, "skip %s: %v", src, err)
 			return nil
 		}
 		return fmt.Errorf("stat source %s: %w", src, err)
@@ -673,15 +793,15 @@ func backupCopySource(job Job, dst string, opt Options) error {
 				fmt.Fprintf(opt.Log, "INFO: skip missing source %s\n", src)
 				return nil
 			}
+			if isAccessDenied(err) {
+				logWarn(opt, "skip %s: %v", src, err)
+				return nil
+			}
 			return err
 		}
 	}
 	if info.IsDir() {
 		return copyDir(src, dst, job.Excludes, opt, true)
-	}
-	if skip, reason := shouldSkipPath(src, job.Excludes, opt); skip {
-		logSkip(opt, src, reason)
-		return nil
 	}
 	return copyFile(src, dst, opt)
 }
@@ -865,7 +985,7 @@ func runCmdToFile(script, dst string, opt Options) error {
 func copyDir(srcDir, dstDir string, excludes []string, opt Options, backupSide bool) error {
 	return filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return err
+			return walkAccessErr(path, info, err, opt)
 		}
 		rel, err := filepath.Rel(srcDir, path)
 		if err != nil {
@@ -885,7 +1005,14 @@ func copyDir(srcDir, dstDir string, excludes []string, opt Options, backupSide b
 				fmt.Fprintf(opt.Log, "dry-run: would ensure dir %s\n", dstDir)
 				return nil
 			}
-			return os.MkdirAll(dstDir, 0o755)
+			if err := os.MkdirAll(dstDir, 0o755); err != nil {
+				if isAccessDenied(err) {
+					logWarn(opt, "skip %s: %v", dstDir, err)
+					return filepath.SkipDir
+				}
+				return err
+			}
+			return nil
 		}
 
 		checkPath := path
@@ -894,8 +1021,22 @@ func copyDir(srcDir, dstDir string, excludes []string, opt Options, backupSide b
 		}
 		if skip, reason := shouldSkipPath(checkPath, excludes, opt); skip {
 			logSkip(opt, checkPath, reason)
+			// Symlinks to dirs report !IsDir via Lstat; only real dirs use SkipDir.
 			if info.IsDir() {
 				return filepath.SkipDir
+			}
+			return nil
+		}
+		// Preserve symlinks as links (do not follow). Critical for self-referential
+		// links like Scripts/sync-ts/sync-ts -> Scripts/sync-ts; Open would fail
+		// with "is a directory" if the link target is a directory.
+		if info.Mode()&os.ModeSymlink != 0 {
+			if err := copySymlink(path, dst, opt); err != nil {
+				if isAccessDenied(err) {
+					logWarn(opt, "skip %s: %v", path, err)
+					return nil
+				}
+				return err
 			}
 			return nil
 		}
@@ -904,13 +1045,74 @@ func copyDir(srcDir, dstDir string, excludes []string, opt Options, backupSide b
 				fmt.Fprintf(opt.Log, "dry-run: would ensure dir %s\n", dst)
 				return nil
 			}
-			return os.MkdirAll(dst, info.Mode().Perm())
+			if err := os.MkdirAll(dst, info.Mode().Perm()); err != nil {
+				if isAccessDenied(err) {
+					logWarn(opt, "skip %s: %v", path, err)
+					return filepath.SkipDir
+				}
+				return err
+			}
+			return nil
 		}
-		return copyFile(path, dst, opt)
+		// Sockets, FIFOs, devices: not regular files; Open fails (e.g. ENOTSUP).
+		if reason, ok := specialFileSkipReason(info.Mode()); ok {
+			logSkip(opt, path, reason)
+			return nil
+		}
+		if err := copyFile(path, dst, opt); err != nil {
+			if isAccessDenied(err) {
+				logWarn(opt, "skip %s: %v", path, err)
+				return nil
+			}
+			if isUnsupportedFileType(err) {
+				logSkip(opt, path, "special file")
+				return nil
+			}
+			return err
+		}
+		return nil
 	})
 }
 
+func copySymlink(src, dst string, opt Options) error {
+	target, err := os.Readlink(src)
+	if err != nil {
+		return fmt.Errorf("readlink %s: %w", src, err)
+	}
+	if opt.DryRun {
+		fmt.Fprintf(opt.Log, "dry-run: would symlink %s -> %s\n", dst, target)
+		return nil
+	}
+	if existing, err := os.Readlink(dst); err == nil && existing == target {
+		if opt.Verbose {
+			fmt.Fprintf(opt.Log, "INFO: identical symlink, skip %s\n", dst)
+		}
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fmt.Errorf("mkdir for %s: %w", dst, err)
+	}
+	// Remove any existing file/dir/symlink at dst so Symlink can succeed.
+	_ = os.RemoveAll(dst)
+	if err := os.Symlink(target, dst); err != nil {
+		return fmt.Errorf("symlink %s -> %s: %w", dst, target, err)
+	}
+	fmt.Fprintf(opt.Log, "symlinked %s -> %s\n", dst, target)
+	return nil
+}
+
 func copyFile(src, dst string, opt Options) error {
+	// If caller did not check, never Open a symlink-to-dir as a regular file.
+	if fi, err := os.Lstat(src); err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return copySymlink(src, dst, opt)
+		}
+		if reason, ok := specialFileSkipReason(fi.Mode()); ok {
+			logSkip(opt, src, reason)
+			return nil
+		}
+	}
+
 	if opt.DryRun {
 		fmt.Fprintf(opt.Log, "dry-run: would copy %s -> %s\n", src, dst)
 		return nil
@@ -930,6 +1132,9 @@ func copyFile(src, dst string, opt Options) error {
 
 	in, err := os.Open(src)
 	if err != nil {
+		if isAccessDenied(err) {
+			return err // caller may warn+continue; keep typed for isAccessDenied
+		}
 		return err
 	}
 	defer in.Close()
@@ -959,13 +1164,22 @@ func copyFile(src, dst string, opt Options) error {
 }
 
 func sameContent(a, b string) bool {
-	ai, err := os.Stat(a)
+	// Compare symlink targets without following (avoids "is a directory" / loops).
+	ai, err := os.Lstat(a)
 	if err != nil {
 		return false
 	}
-	bi, err := os.Stat(b)
+	bi, err := os.Lstat(b)
 	if err != nil {
 		return false
+	}
+	if ai.Mode()&os.ModeSymlink != 0 || bi.Mode()&os.ModeSymlink != 0 {
+		if ai.Mode()&os.ModeSymlink == 0 || bi.Mode()&os.ModeSymlink == 0 {
+			return false
+		}
+		at, err1 := os.Readlink(a)
+		bt, err2 := os.Readlink(b)
+		return err1 == nil && err2 == nil && at == bt
 	}
 	if ai.Size() != bi.Size() {
 		return false
@@ -1004,13 +1218,97 @@ func excluded(base string, patterns []string) bool {
 	return false
 }
 
+// walkAccessErr handles filepath.Walk callback errors. Permission / TCC denials
+// are warnings so one locked path (e.g. ~/.Trash) does not abort the whole backup.
+func walkAccessErr(path string, info os.FileInfo, err error, opt Options) error {
+	if err == nil {
+		return nil
+	}
+	if isAccessDenied(err) {
+		logWarn(opt, "skip %s: %v", path, err)
+		if info != nil && info.IsDir() {
+			return filepath.SkipDir
+		}
+		// Unknown whether dir: SkipDir is safe when walk cannot read a path.
+		return filepath.SkipDir
+	}
+	return err
+}
+
+// specialFileSkipReason returns a human reason if mode is a non-copyable special
+// file (unix socket, FIFO, device). Regular files, dirs, and symlinks are not special.
+func specialFileSkipReason(mode os.FileMode) (reason string, skip bool) {
+	switch mode.Type() {
+	case os.ModeSocket:
+		return "socket", true
+	case os.ModeNamedPipe:
+		return "named pipe", true
+	case os.ModeDevice:
+		return "device", true
+	case os.ModeCharDevice:
+		return "char device", true
+	case os.ModeIrregular:
+		return "special file", true
+	default:
+		return "", false
+	}
+}
+
+// isUnsupportedFileType reports open/read failures for sockets and similar
+// (e.g. "operation not supported on socket") as a last-line soft skip.
+func isUnsupportedFileType(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "operation not supported") ||
+		strings.Contains(msg, "not supported on socket") ||
+		strings.Contains(msg, "is a socket")
+}
+
+// isAccessDenied reports permission / operation-not-permitted style failures
+// (including macOS TCC on ~/.Trash).
+func isAccessDenied(err error) bool {
+	if err == nil {
+		return false
+	}
+	if os.IsPermission(err) {
+		return true
+	}
+	var pe *os.PathError
+	if errors.As(err, &pe) {
+		if os.IsPermission(pe.Err) {
+			return true
+		}
+		// syscall.EPERM is not always classified as IsPermission on all platforms.
+		if pe.Err != nil {
+			msg := strings.ToLower(pe.Err.Error())
+			if strings.Contains(msg, "permission denied") ||
+				strings.Contains(msg, "operation not permitted") {
+				return true
+			}
+		}
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "permission denied") ||
+		strings.Contains(msg, "operation not permitted")
+}
+
+func logWarn(opt Options, format string, args ...any) {
+	w := opt.Log
+	if w == nil {
+		w = os.Stderr
+	}
+	fmt.Fprintf(w, "warning: "+format+"\n", args...)
+}
+
 // shouldSkipPath applies the home walk skip policy when absPath is under $HOME;
 // otherwise only basename excludes apply.
 //
 // Policy (home-relative):
 //  1. force-include (keep; exclude still wins if both)
 //  2. force-exclude → skip
-//  3. pathflag DefaultSkipMask → skip
+//  3. pathflag BackupSkipMask → skip (reclaim defaults + history)
 //  4. basename/glob excludes → skip
 func shouldSkipPath(absPath string, basenameExcludes []string, opt Options) (bool, string) {
 	home := os.Getenv("HOME")
@@ -1023,7 +1321,7 @@ func shouldSkipPath(absPath string, basenameExcludes []string, opt Options) (boo
 		}
 		if !inc {
 			res, err := pathflag.Classify(homeRel)
-			if err == nil && res.Flags&pathflag.DefaultSkipMask != 0 {
+			if err == nil && res.Flags&pathflag.BackupSkipMask != 0 {
 				reason := res.Reason
 				if reason == "" {
 					reason = res.Flags.String()
@@ -1076,6 +1374,10 @@ func forcePrefixMatch(homeRel string, patterns []string) bool {
 }
 
 func logSkip(opt Options, path, reason string) {
+	w := opt.Log
+	if w == nil {
+		w = io.Discard
+	}
 	// Prefer home-relative path in the message when under HOME.
 	display := path
 	if home := os.Getenv("HOME"); home != "" {
@@ -1084,8 +1386,8 @@ func logSkip(opt Options, path, reason string) {
 		}
 	}
 	if reason != "" {
-		fmt.Fprintf(opt.Log, "INFO: skip %s (%s)\n", display, reason)
+		fmt.Fprintf(w, "INFO: skip %s (%s)\n", display, reason)
 	} else {
-		fmt.Fprintf(opt.Log, "INFO: skip %s\n", display)
+		fmt.Fprintf(w, "INFO: skip %s\n", display)
 	}
 }

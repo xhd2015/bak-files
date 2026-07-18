@@ -13,6 +13,11 @@ const (
 	OwnerNpm      Owner = "npm"
 	OwnerCargo    Owner = "cargo"
 	OwnerChromium Owner = "chromium"
+	OwnerClaude      Owner = "claude"
+	OwnerAndroid     Owner = "android"
+	OwnerNvm         Owner = "nvm"
+	OwnerCisco       Owner = "cisco"
+	OwnerCommandcode Owner = "commandcode"
 )
 
 // IsNone reports whether o is the empty/none owner.
@@ -29,7 +34,8 @@ func (o Owner) String() string {
 func (o Owner) Valid() bool {
 	switch o {
 	case OwnerNone, OwnerCodex, OwnerOpenCode, OwnerGrok, OwnerCursor,
-		OwnerBun, OwnerNpm, OwnerCargo, OwnerChromium:
+		OwnerBun, OwnerNpm, OwnerCargo, OwnerChromium, OwnerClaude, OwnerAndroid,
+		OwnerNvm, OwnerCisco, OwnerCommandcode:
 		return true
 	default:
 		return false

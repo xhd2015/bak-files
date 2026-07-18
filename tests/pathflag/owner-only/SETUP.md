@@ -4,12 +4,14 @@
 
 ```
 # owner table longest-prefix; Flags stay zero, no Rule
-caller -> Classify(".codex/sessions/x") -> Owner=codex, Flags="", Rule=""
+caller -> Classify(".codex/config.toml") -> Owner=codex, Flags="", Rule=""
 ```
 
 ## Preconditions
 
 - Path matches an owner prefix but not an attribute catalog rule.
+- Session trees under `.codex/sessions` and `.grok/sessions` are **history**
+  attributes (not owner-only).
 
 ## Steps
 

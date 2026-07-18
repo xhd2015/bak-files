@@ -28,9 +28,11 @@ pathflag.Flag bits -> String() "tmp|cache|..." | Names() []string
 
 ## Context
 
-- Flag.String names (ascending bit order): tmp, cache, logs, binary, trash, meta, vendor.
+- Flag.String names (ascending bit order): tmp, cache, logs, binary, trash, meta, vendor, history.
+- DefaultSkipMask excludes history; BackupSkipMask = DefaultSkipMask | FlagHistory.
 - Owner strings: codex, opencode, grok, cursor, bun, npm, cargo, chromium (or empty).
 - Longest catalog prefix wins among path rules; owner table is always resolved.
+- Sessions (`.grok/sessions`, `.codex/sessions`) are history, not cache/tmp.
 
 ```go
 import "testing"

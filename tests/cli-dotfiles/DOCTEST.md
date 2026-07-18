@@ -1,11 +1,15 @@
-# bak-files — default home dots + pathflag skips + CLI/config overrides
+# bak-files — home whitelist, general files array whitelist, default dots, pathflag, CLI
 
-**Classic TDD** for automatic **home top-level dotfile discovery**, **pathflag**
-walk skips under `$HOME`, and **`--no-dot-files` / `--include` / `--exclude`**
-plus config `global.includeDotFiles` / `dotIncludes` / `dotExcludes`.
+**Classic TDD** for **whitelist-driven** backup policy, automatic **top-level
+dot discovery** (`includeDotFiles` ≡ synthetic **`~/.*`**), **bare `"~":
+[names]`** expansion (never full-home `copyDir`), **any `PREFIX: [names]`
+string-array whitelist** (never full-PREFIX `copyDir`), **pathflag** walk skips
+under `$HOME`, and **`--no-dot-files` / `--include` / `--exclude`** plus config
+`global.includeDotFiles` / `dotIncludes` / `dotExcludes`.
 
-Out of scope: binary content detection, private bak.config, hooks/git modes.
-Do **not** modify sealed `tests/cli-*` or `tests/pathflag`.
+Out of scope: binary content detection, private bak.config, hooks/git modes,
+pathflag catalog changes, ExpandPath changes for `~/foo`.
+Do **not** modify sealed sibling `tests/cli-*` or `tests/pathflag`.
 
 Target binary:
 
@@ -17,9 +21,9 @@ Module: `github.com/xhd2015/bak-files`
 
 # DSN (Domain Specific Notion)
 
-**bak-files** is a CLI that loads **bak.config** and, beyond explicit **files**
-entries, may **auto-discover** top-level **dot names** under **`$HOME`** when
-**includeDotFiles** is enabled (default **true** when the key is omitted).
+**bak-files** is a CLI that loads **bak.config** and resolves **files** into
+**copy jobs** under a **whitelist-only** model: only paths matching explicit
+entries (after expand) plus optional synthetic home-dot discovery are backed up.
 
 An **operator** invokes:
 
@@ -28,18 +32,44 @@ An **operator** invokes:
 - **`bak-files restore`** — reverse copy with the **same skip policy** on
   home-relative paths during the walk
 - **`bak-files list`** — print **mapping paths** for explicit **and** discovered
-  jobs (same discovery rules as backup)
+  jobs (same ResolveJobs rules as backup)
 - **`bak-files backup|restore|list --help`** — document flags including
   **`--no-dot-files`**, **`--include`**, **`--exclude`**
 
-**Discovery** (when dots enabled: default / config true; disabled by
-`--no-dot-files` or `global.includeDotFiles: false`):
+**Bare `"~"` key (home basename whitelist)** — **never** a recursive job of
+`$HOME`:
 
-1. Read `$HOME` top-level entries whose names start with `.`
+| Config | Behavior |
+|--------|----------|
+| `"~": ["name", …]` | Each **name** → ordinary job key `~/name`, source `$HOME/name`, mapping via `~` prefix (e.g. `HOME/$WORKING_ROLE/name`) |
+| `"~": [".bashrc"]` etc. | Dot names are whitelist entries (subset of `~/.*` when dots on) |
+| Non-dot in array (e.g. `"Notes"`) | Whitelist addition `~/Notes` |
+| Array ignored + `ExpandPath("~")` → `$HOME` | **Bug** (historical): full-home `copyDir` |
+
+There is **no home-root job**. Trees such as `Library/`, `Downloads/` are
+**not** backed up unless listed (via `"~"` array or an explicit `~/…` key).
+
+**Any `files` key PREFIX with string array value** — same rule, not only `"~"`:
+
+| Config | Behavior |
+|--------|----------|
+| `"$W0/proj": [".vscode"]` | One job: key `$W0/proj/.vscode`, source `expand($W0)/proj/.vscode`, mapping e.g. `W/proj/.vscode` |
+| `PREFIX: [name, …]` | Each basename → `PREFIX/name` job; **never** Source=full expanded PREFIX alone |
+| Object `{"excludes":[…]}` / `true` | Still full PREFIX with optional excludes — **unchanged** |
+| Array only for `"~"`, other PREFIX full-tree | **Bug** (current): vendor poison — **files-array-whitelist** leaves RED until fixed |
+
+**Discovery / synthetic `~/.*`** (when dots enabled: default / config true;
+disabled by `--no-dot-files` or `global.includeDotFiles: false`):
+
+1. Equivalent to a synthetic whitelist of top-level `$HOME` basenames starting
+   with `.` (existing discovery)
 2. If no explicit job already covers that source, add a job with key `~/name`,
    source `$HOME/name`, mapping via `~` → e.g. `HOME/$WORKING_ROLE`
+3. When dots **off**, only explicit entries remain — including names expanded
+   from the `"~"` array
 
-**Skip policy** (any walk under `$HOME`, home-relative path):
+**Skip policy** (any walk under an already-included `$HOME` job tree,
+home-relative path) — filters only **narrow** included trees:
 
 1. force-include (`--include` ∪ `global.dotIncludes`) → keep
 2. force-exclude (`--exclude` ∪ `global.dotExcludes`) → skip (**exclude wins**
@@ -51,23 +81,24 @@ An **operator** invokes:
 
 **Config** may set `global.includeDotFiles`, `global.dotIncludes`,
 `global.dotExcludes`, and existing `global.excludes`. Secrets such as `.ssh`
-are **included by default** (not pathflag-skipped unless excluded).
+are **included by default** when discovered or listed (not pathflag-skipped
+unless excluded).
 
 Participants:
 
 | Participant | Role |
 |-------------|------|
 | Operator | Invokes backup/restore/list; sets CLI include/exclude/no-dot-files |
-| bak-files CLI | Discovers dots; walks jobs; applies skip policy; copies or dry-runs |
-| bak.config | files, mapping, targetDir, global.includeDotFiles / excludes / dots |
+| bak-files CLI | Expands `"~"` / any PREFIX string arrays; discovers dots; walks jobs; skip policy; copies |
+| bak.config | files (incl. `"~": [names]`, `"$W0/…": [names]`), mapping, targetDir, global dots/excludes |
 | pathflag | Classifies home-relative paths; DefaultSkipMask drives walk skips |
-| $HOME tree | Top-level dots and nested paths under simulated HOME |
+| $HOME tree | Top-level dots, whitelist basenames, nested paths under simulated HOME |
 | targetDir | Backup store under WorkDir (e.g. `./files`) |
 | Environment | HOME, WORKING_ROLE for expand + validate |
 
 ## Version
 
-0.0.2
+0.0.4
 
 ## Decision Tree
 
@@ -76,14 +107,23 @@ tests/cli-dotfiles/                              [Request{Args,Env,WorkDir,paths
 │                                                Run: session-build + exec bak-files
 ├── help/                                        # usage documents new flags
 │   └── backup-flags/                            # backup --help → --no-dot-files, --include, --exclude
-├── list/                                        # list uses same discovery as backup
-│   └── discovers-dots/                          # empty files + home .bashrc → mapping path listed
-├── backup/                                      # backup + discovery / filters / walk
-│   ├── discovery/                               # auto-dot jobs (empty or sparse files)
+├── list/                                        # list uses same ResolveJobs as backup
+│   ├── discovers-dots/                          # empty files + home .bashrc → mapping path listed
+│   ├── tilde-array-expands/                     # "~": [".bashrc"] → HOME/alice/.bashrc, not bare HOME/alice
+│   └── project-array-expands/                   # "$W0/proj": [".vscode"] → W/proj/.vscode, not bare W/proj  [RED until general array]
+├── backup/                                      # backup + discovery / filters / walk / whitelist
+│   ├── discovery/                               # auto-dot jobs (empty or sparse files) ≡ ~/.*
 │   │   ├── default-on/                          # dots on: would/copy .bashrc; skip .cache
 │   │   ├── config-off/                          # includeDotFiles false → no auto dots
 │   │   ├── flag-off/                            # --no-dot-files → no auto dots
 │   │   └── dedupe-explicit/                     # explicit ~/.bashrc + discover → one copy
+│   ├── home-whitelist/                          # bare "~" array must not full-home copy
+│   │   ├── tilde-no-library/                    # "~": [".bashrc"] + Library poison → no Library
+│   │   ├── tilde-array-ssh-dots-off/            # dots off + "~": [".ssh"] → .ssh only, not .bashrc
+│   │   ├── tilde-array-notes/                   # dots off + "~": ["Notes"] → Notes only, not Library
+│   │   └── explicit-scripts/                    # "~/Scripts": true → Scripts; Library out
+│   ├── files-array-whitelist/                   # any PREFIX: [names] — not only bare "~"  [RED until general array]
+│   │   └── project-vscode-only/                 # "$W0/proj": [".vscode"] + vendor poison → no vendor
 │   ├── filters/                                 # CLI force include/exclude
 │   │   ├── include-cache/                       # --include .cache keeps pathflag-cache path
 │   │   ├── exclude-ssh/                         # --exclude .ssh skips default-included secret
@@ -96,9 +136,8 @@ tests/cli-dotfiles/                              [Request{Args,Env,WorkDir,paths
 ```
 
 **Significance order:** subcommand / surface (help | list | backup | restore) →
-backup concern (discovery enablement | force filters | walk-time skip) →
-concrete scenario (default / config / flag / dedupe / include / exclude / wins /
-pathflag partial / basename / restore dry-run).
+backup concern (discovery | **home-whitelist** | **files-array-whitelist** |
+force filters | walk-time skip) → concrete scenario.
 
 ## Test Index
 
@@ -106,10 +145,17 @@ pathflag partial / basename / restore dry-run).
 |------|-------------|
 | `help/backup-flags` | `backup --help` mentions `--no-dot-files`, `--include`, `--exclude` |
 | `list/discovers-dots` | Empty `files` + home `.bashrc`; list prints mapping path for it |
+| `list/tilde-array-expands` | `"~": [".bashrc"]` dots off → list `HOME/alice/.bashrc`, not bare `HOME/alice` |
+| `list/project-array-expands` | `"$W0/proj": [".vscode"]` → list `W/proj/.vscode`, not bare `W/proj` (**RED** until general array) |
 | `backup/discovery/default-on` | Dry-run: would handle `.bashrc`; skip `.cache`; no targetDir writes |
 | `backup/discovery/config-off` | `includeDotFiles: false` → no auto-dot backup of `.bashrc` |
 | `backup/discovery/flag-off` | `--no-dot-files` → no auto-dot backup of `.bashrc` |
 | `backup/discovery/dedupe-explicit` | Explicit `~/.bashrc` + discover → single copy under mapping path |
+| `backup/home-whitelist/tilde-no-library` | `"~": [".bashrc"]` backs bashrc; never Library (no full-home) |
+| `backup/home-whitelist/tilde-array-ssh-dots-off` | Dots off + `"~": [".ssh"]` → only `.ssh`; not `.bashrc` |
+| `backup/home-whitelist/tilde-array-notes` | Dots off + `"~": ["Notes"]` → Notes only; not Library |
+| `backup/home-whitelist/explicit-scripts` | Explicit `~/Scripts` works; Library not pulled |
+| `backup/files-array-whitelist/project-vscode-only` | `"$W0/proj": [".vscode"]` keeps settings; never vendor (**RED** until general array) |
 | `backup/filters/include-cache` | `--include .cache` force-keeps cache tree content |
 | `backup/filters/exclude-ssh` | `--exclude .ssh` skips `.ssh` while other dots backup |
 | `backup/filters/exclude-wins` | Both `--include` and `--exclude` on `.cache` → skip |

@@ -13,11 +13,15 @@ const (
 	FlagBinary Flag = 1 << 3
 	FlagTrash  Flag = 1 << 4
 	FlagMeta   Flag = 1 << 5
-	FlagVendor Flag = 1 << 6
+	FlagVendor  Flag = 1 << 6
+	FlagHistory Flag = 1 << 7
 )
 
-// DefaultSkipMask is the convenience mask of all skip-oriented attributes.
+// DefaultSkipMask is the reclaim-oriented mask (no history).
 const DefaultSkipMask = FlagTmp | FlagCache | FlagLogs | FlagBinary | FlagTrash | FlagMeta | FlagVendor
+
+// BackupSkipMask is the bak walk skip mask: reclaim defaults plus history.
+const BackupSkipMask = DefaultSkipMask | FlagHistory
 
 var flagNames = []struct {
 	bit  Flag
@@ -30,6 +34,7 @@ var flagNames = []struct {
 	{FlagTrash, "trash"},
 	{FlagMeta, "meta"},
 	{FlagVendor, "vendor"},
+	{FlagHistory, "history"},
 }
 
 // Has reports whether all bits in mask are set on f.

@@ -19,7 +19,9 @@ caller -> Classify(catalogPath)
 
 ## Context
 
-- Representative rows cover Cache, Logs, Tmp, Binary, Trash, Meta, and multi-flag combos.
+- Representative rows cover Cache, Logs, Tmp, Binary, Trash, Meta, History,
+  and multi-flag combos. Session trees use `history` (never cache/tmp).
+- `.local` is fine-prefix only; whole `.local` is not a rule.
 
 ```go
 import "testing"
