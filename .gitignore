@@ -1,0 +1,34 @@
+# Binaries
+/bin/
+/bak-files
+bak-files
+*.exe
+*.test
+*.out
+
+# Coverage
+*.cover
+coverage.out
+coverage.html
+*.coverprofile
+
+# Payload / index / stats (runtime data)
+/files/
+files/
+bak.stats
+sum.index
+
+# Secrets / env
+.env
+.env.*
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Go workspace local
+go.work
+go.work.sum
