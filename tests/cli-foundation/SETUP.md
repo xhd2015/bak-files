@@ -31,16 +31,16 @@ repo .gitignore covers binaries, files/, bak.stats, sum.index, .env, .DS_Store
 
 ## Preconditions
 
-- Module root: `DOCTEST_ROOT/../..` (repo root with `go.mod`; feature root is
+- Module root: `d.DOCTEST_ROOT/../..` (repo root with `go.mod`; feature root is
   `tests/cli-foundation`).
 - Production entrypoint (implementer): `cmd/bak-files` (may not exist yet — leaves
   that need the binary will fail `go build` until implemented).
 - Flags library (implementer): prefer `github.com/xhd2015/less-flags`.
-- Session cache (shared across parallel leaves of one `doctest test` run):
-  `$TMPDIR/bak-files-cli-foundation-<DOCTEST_SESSION_ID>/`
+- Process-local binary cache (in-memory mutex, one-process suite):
+  `process-local MkdirTemp binary (in-memory mutex)`
   - `bak-files` — built binary
   - `binaries.ready` — sentinel after successful build
-  - `build.lock` — flock for first-time population
+  - `build.lock` — in-memory mutex for first-time population
 - Per-leaf isolation: CLI leaves only read stdout/stderr/exit; no shared mutable
   workspace under the module root.
 - Default `Request.Mode` is `"cli"`. Leaves set `Mode` to `"build"` or
@@ -49,7 +49,7 @@ repo .gitignore covers binaries, files/, bak.stats, sum.index, .env, .DS_Store
 ## Steps
 
 1. Root Setup leaves `Mode`/`Args` defaults unset for grouping nodes to fill.
-2. For `Mode=cli`, `Run` builds the binary once per session (flock) then
+2. For `Mode=cli`, `Run` builds the binary once per process (in-memory mutex) then
    executes `bin Args...` with cwd = module root; captures stdout, stderr, exit.
 3. For `Mode=build`, `Run` runs a fresh `go build -o <temp> ./cmd/bak-files`.
 4. For `Mode=gitignore`, `Run` reads module-root `.gitignore` into

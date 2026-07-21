@@ -20,12 +20,12 @@ bak-files backup --help -> Usage documents --no-dot-files, --include, --exclude
 
 ## Preconditions
 
-- Module root: `DOCTEST_ROOT/../..` (feature root is `tests/cli-dotfiles`).
+- Module root: `d.DOCTEST_ROOT/../..` (feature root is `tests/cli-dotfiles`).
 - Production entrypoint: `cmd/bak-files` (home-whitelist ResolveJobs may be RED
   until implementer greens — classic TDD).
-- Session cache: `$TMPDIR/bak-files-cli-dotfiles-<DOCTEST_SESSION_ID>/`
+- Process-local binary/cache via in-memory mutex (one-process suite; not in-memory mutex)
   - `bak-files` — built binary
-  - `binaries.ready`, `build.lock` — flock one-time build
+  - `binaries.ready`, `build.lock` — in-memory once build
 - Per-leaf isolation: each leaf uses `t.TempDir()` as `WorkDir`; no writes
   under the module root.
 - Fixtures: prefer mapping `"~": "HOME/$WORKING_ROLE"`, `WORKING_ROLE=alice`,
