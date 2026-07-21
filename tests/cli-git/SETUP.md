@@ -22,12 +22,12 @@ operator -> bak-files restore --config …
 
 ## Preconditions
 
-- Module root: `DOCTEST_ROOT/../..` (feature root is `tests/cli-git`).
+- Module root: `d.DOCTEST_ROOT/../..` (feature root is `tests/cli-git`).
 - Production entrypoint: `cmd/bak-files` (git modes RED until implementer).
 - **`git` on PATH** — leaves fail Setup if `git` is missing (not skipped).
-- Session cache: `$TMPDIR/bak-files-cli-git-<DOCTEST_SESSION_ID>/`
+- Process-local binary/cache via in-memory mutex (one-process suite; not in-memory mutex)
   - `bak-files` — built binary
-  - `binaries.ready`, `build.lock` — flock one-time build
+  - `binaries.ready`, `build.lock` — in-memory once build
 - Per-leaf isolation: each leaf uses `t.TempDir()` as `WorkDir`.
 - Git fixtures: `git init` under `HOME/repo` **without** remotes; identity
   set via `user.email` / `user.name` locally. No `fetch`/`push`/`pull`.

@@ -17,11 +17,11 @@ operator -> bak-files restore --config …
 
 ## Preconditions
 
-- Module root: `DOCTEST_ROOT/../..` (feature root is `tests/cli-hooks`).
+- Module root: `d.DOCTEST_ROOT/../..` (feature root is `tests/cli-hooks`).
 - Production entrypoint: `cmd/bak-files` (hooks/cmd may be RED until implementer).
-- Session cache: `$TMPDIR/bak-files-cli-hooks-<DOCTEST_SESSION_ID>/`
+- Process-local binary/cache via in-memory mutex (one-process suite; not in-memory mutex)
   - `bak-files` — built binary
-  - `binaries.ready`, `build.lock` — flock one-time build
+  - `binaries.ready`, `build.lock` — in-memory once build
 - Per-leaf isolation: each leaf uses `t.TempDir()` as `WorkDir`; scripts only
   touch paths under that WorkDir.
 - Safe scripts only: `printf`/`echo`, `touch`, `exit 1`.

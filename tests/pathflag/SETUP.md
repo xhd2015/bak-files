@@ -13,7 +13,7 @@ pathflag.Flag bits -> String() "tmp|cache|..." | Names() []string
 
 ## Preconditions
 
-- Module root: `DOCTEST_ROOT/../..` (repo with `go.mod`).
+- Module root: `d.DOCTEST_ROOT/../..` (repo with `go.mod`).
 - Production package (implementer): `github.com/xhd2015/bak-files/pathflag`.
 - No filesystem fixtures required — Classify is pure string logic.
 - Classic TDD: package may be missing; compile/runtime RED is expected until implementer lands code.

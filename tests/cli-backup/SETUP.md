@@ -22,12 +22,12 @@ global.excludes + entry excludes → matching names not copied
 
 ## Preconditions
 
-- Module root: `DOCTEST_ROOT/../..` (feature root is `tests/cli-backup`).
+- Module root: `d.DOCTEST_ROOT/../..` (feature root is `tests/cli-backup`).
 - Production entrypoint: `cmd/bak-files` (backup/restore may still be stubs
   until implementer greens this tree — classic TDD RED first).
-- Session cache: `$TMPDIR/bak-files-cli-backup-<DOCTEST_SESSION_ID>/`
+- Process-local binary/cache via in-memory mutex (one-process suite; not in-memory mutex)
   - `bak-files` — built binary
-  - `binaries.ready`, `build.lock` — flock one-time build
+  - `binaries.ready`, `build.lock` — in-memory once build
 - Per-leaf isolation: each leaf uses `t.TempDir()` as `WorkDir`; no writes
   under the module root.
 - Fixtures: config + source trees written in leaf Setup; absolute paths recorded

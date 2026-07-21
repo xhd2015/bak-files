@@ -15,11 +15,11 @@ operator -> bak-files backup --config … --dry-run
 
 ## Preconditions
 
-- Module root: `DOCTEST_ROOT/../..` (feature root is `tests/cli-symlink`).
+- Module root: `d.DOCTEST_ROOT/../..` (feature root is `tests/cli-symlink`).
 - Production entrypoint: `cmd/bak-files` (symlink preserve already implemented).
-- Session cache: `$TMPDIR/bak-files-cli-symlink-<DOCTEST_SESSION_ID>/`
+- Process-local binary/cache via in-memory mutex (one-process suite; not in-memory mutex)
   - `bak-files` — built binary
-  - `binaries.ready`, `build.lock` — flock one-time build
+  - `binaries.ready`, `build.lock` — in-memory once build
 - Per-leaf isolation: each leaf uses `t.TempDir()` as `WorkDir`; no writes
   under the module root.
 - Fixtures: mapping `"~": "HOME/$WORKING_ROLE"`, `WORKING_ROLE=alice`,

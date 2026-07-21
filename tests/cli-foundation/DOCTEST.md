@@ -115,14 +115,16 @@ doctest test ./tests/cli-foundation/help/root/empty-args
 
 ```go
 import (
+	"sync"
 	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
+
+	"github.com/xhd2015/doctest/session"
 )
 
 // Request selects what the harness exercises.
@@ -142,13 +144,13 @@ type Response struct {
 	BuildSucceeded    bool
 }
 
-func Run(t *testing.T, req *Request) (*Response, error) {
+func Run(t *testing.T, d *session.Doctest, req *Request) (*Response, error) {
 	t.Helper()
 	mode := req.Mode
 	if mode == "" {
 		mode = "cli"
 	}
-	root := moduleRoot(t)
+	root := moduleRoot(t, d)
 
 	switch mode {
 	case "gitignore":
@@ -196,7 +198,7 @@ func Run(t *testing.T, req *Request) (*Response, error) {
 		}, nil
 
 	default: // cli
-		bin := ensureBakFilesBinary(t)
+		bin := ensureBakFilesBinary(t, d)
 		cmd := exec.Command(bin, req.Args...)
 		cmd.Dir = root
 		var stdout, stderr bytes.Buffer
@@ -224,10 +226,9 @@ func Run(t *testing.T, req *Request) (*Response, error) {
 	}
 }
 
-func moduleRoot(t *testing.T) string {
+func moduleRoot(t *testing.T, d *session.Doctest) string {
 	t.Helper()
-	// DOCTEST_ROOT is tests/cli-foundation → module root (go.mod) is two levels up.
-	root, err := filepath.Abs(filepath.Join(DOCTEST_ROOT, "../.."))
+	root, err := filepath.Abs(filepath.Join(d.DOCTEST_ROOT, "../.."))
 	if err != nil {
 		t.Fatalf("module root: %v", err)
 	}
@@ -237,58 +238,38 @@ func moduleRoot(t *testing.T) string {
 	return root
 }
 
-func sessionCacheDir() string {
-	return filepath.Join(os.TempDir(), "bak-files-cli-foundation-"+DOCTEST_SESSION_ID)
-}
+// Process-local binary (one-process suite; in-memory mutex, not session flock).
+var (
+	ensureBakFilesBinaryMu   sync.Mutex
+	ensureBakFilesBinaryPath string
+	ensureBakFilesBinaryErr  error
+)
 
-func withFileLock(t *testing.T, lockPath string, fn func() error) {
+func ensureBakFilesBinary(t *testing.T, d *session.Doctest) string {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
-		t.Fatalf("mkdir cache: %v", err)
+	ensureBakFilesBinaryMu.Lock()
+	defer ensureBakFilesBinaryMu.Unlock()
+	if ensureBakFilesBinaryPath != "" || ensureBakFilesBinaryErr != nil {
+		if ensureBakFilesBinaryErr != nil {
+			t.Fatal(ensureBakFilesBinaryErr)
+		}
+		return ensureBakFilesBinaryPath
 	}
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+	dir, err := os.MkdirTemp("", "ensureBakFilesBinary-")
 	if err != nil {
-		t.Fatalf("open lock: %v", err)
-	}
-	defer f.Close()
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		t.Fatalf("flock: %v", err)
-	}
-	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-	if err := fn(); err != nil {
+		ensureBakFilesBinaryErr = err
 		t.Fatal(err)
 	}
-}
-
-func ensureBakFilesBinary(t *testing.T) string {
-	t.Helper()
-	cache := sessionCacheDir()
-	bin := filepath.Join(cache, "bak-files")
-	ready := filepath.Join(cache, "binaries.ready")
-	lock := filepath.Join(cache, "build.lock")
-	root := moduleRoot(t)
-
-	withFileLock(t, lock, func() error {
-		if fileExists(ready) && fileExists(bin) {
-			return nil
-		}
-		if err := os.MkdirAll(cache, 0o755); err != nil {
-			return err
-		}
-		cmd := exec.Command("go", "build", "-o", bin, "./cmd/bak-files")
-		cmd.Dir = root
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("go build ./cmd/bak-files: %w\n%s", err, out)
-		}
-		return os.WriteFile(ready, []byte("ok"), 0o644)
-	})
-	return bin
-}
-
-func fileExists(p string) bool {
-	st, err := os.Stat(p)
-	return err == nil && !st.IsDir()
+	binPath := filepath.Join(dir, "bak-files")
+	root := moduleRoot(t, d)
+	cmd := exec.Command("go", "build", "-o", binPath, "./cmd/bak-files")
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		ensureBakFilesBinaryErr = fmt.Errorf("go build ./cmd/bak-files: %w\n%s", err, strings.TrimSpace(string(out)))
+		t.Fatal(ensureBakFilesBinaryErr)
+	}
+	ensureBakFilesBinaryPath = binPath
+	return binPath
 }
 
 // containsFold is a case-insensitive substring check for Assert helpers.
