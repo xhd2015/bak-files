@@ -10,8 +10,9 @@
 |-------|--------|
 | Branch | `master-2026-08-06-use-go-best-practice-to-review-current-project` |
 | Remote | `origin` → `ssh://git@github.com/xhd2015/bak-files.git` |
-| Push result | success (`6437e49..139ff20`, upstream set) |
-| Commit SHA | `139ff20591ad9a7944a56276e4a53e58622491da` (short: `139ff20`) |
+| Push result | success (upstream set; tip `1cac4ab`) |
+| CI commit SHA | `139ff20591ad9a7944a56276e4a53e58622491da` (short: `139ff20`) — workflow + helper |
+| Tip SHA | `1cac4ab02fe22e45c789d0fd0d03690e8cf8c031` (short: `1cac4ab`) — includes this note |
 
 ## Paths changed (in push)
 
@@ -25,7 +26,7 @@
 3. Filter by branch:  
    https://github.com/xhd2015/bak-files/actions?query=branch%3Amaster-2026-08-06-use-go-best-practice-to-review-current-project  
 4. Workflow name: **Test** (`.github/workflows/test.yml`)  
-5. Or open the commit: https://github.com/xhd2015/bak-files/commit/139ff20591ad9a7944a56276e4a53e58622491da and use the checks / Actions tab
+5. Or open the CI commit: https://github.com/xhd2015/bak-files/commit/139ff20591ad9a7944a56276e4a53e58622491da (checks / Actions tab)
 
 ## How this differs from doctest’s workflow
 
