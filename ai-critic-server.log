@@ -1,0 +1,69 @@
+Serving directory preview at http://localhost:23712
+
+To expose this server to the internet via a temporary tunnel:
+
+  # Option 1: Cloudflare Quick Tunnel
+  cloudflared tunnel --url http://localhost:23712
+
+  # Option 2: localtunnel
+  npx localtunnel --port 23712
+
+[bootstrap] phase=core_listen t_ms=327 port=23712
+[auto-task] Running background tasks
+[opencode] Health check: started (every 10s)
+[unified-tunnel] StartGlobalHealthChecks: setting up health check callback
+[unified-tunnel] Global health checks started
+[bootstrap] phase=core_ready t_ms=327 port=23712
+[bootstrap] phase=extension_start t_ms=327
+[auto-task] Running extension
+[bootstrap] phase=extension_done t_ms=2330 err=nil
+[ws-proxy] Auto-start: disabled by config
+[domains] No domains configured, skipping tunnel initialization
+[exposed-urls] No enabled exposed URLs, skipping tunnel initialization
+[unified-tunnel] StartHealthChecks: checking 0 mappings
+[unified-tunnel] StartHealthChecks: checking 0 mappings
+[unified-tunnel] StartHealthChecks: checking 0 mappings
+[unified-tunnel] StartHealthChecks: checking 0 mappings
+[unified-tunnel] StartHealthChecks: checking 0 mappings
+[unified-tunnel] StartHealthChecks: checking 0 mappings
+[unified-tunnel] StartHealthChecks: checking 0 mappings
+[unified-tunnel] StartHealthChecks: checking 0 mappings
+[unified-tunnel] StartHealthChecks: checking 0 mappings
+[unified-tunnel] StartHealthChecks: checking 0 mappings
+[unified-tunnel] StartHealthChecks: checking 0 mappings
+[unified-tunnel] StartHealthChecks: checking 0 mappings
+[unified-tunnel] StartHealthChecks: checking 0 mappings
+[unified-tunnel] StartHealthChecks: checking 0 mappings
+[unified-tunnel] StartHealthChecks: checking 0 mappings
+[unified-tunnel] StartHealthChecks: checking 0 mappings
+[unified-tunnel] StartHealthChecks: checking 0 mappings
+[unified-tunnel] StartHealthChecks: checking 0 mappings
+Stopping opencode health check...
+[opencode] Health check: stopping...
+Serving directory preview at http://localhost:23712
+
+To expose this server to the internet via a temporary tunnel:
+
+  # Option 1: Cloudflare Quick Tunnel
+  cloudflared tunnel --url http://localhost:23712
+
+  # Option 2: localtunnel
+  npx localtunnel --port 23712
+
+[bootstrap] phase=core_listen t_ms=144 port=23712
+[auto-task] Running background tasks
+[opencode] Health check: started (every 10s)
+[unified-tunnel] StartGlobalHealthChecks: setting up health check callback
+[unified-tunnel] Global health checks started
+[bootstrap] phase=core_ready t_ms=144 port=23712
+[bootstrap] phase=extension_start t_ms=144
+[auto-task] Running extension
+[bootstrap] phase=extension_done t_ms=2145 err=nil
+[ws-proxy] Auto-start: disabled by config
+[domains] No domains configured, skipping tunnel initialization
+[exposed-urls] No enabled exposed URLs, skipping tunnel initialization
+[unified-tunnel] StartHealthChecks: checking 0 mappings
+[unified-tunnel] StartHealthChecks: checking 0 mappings
+[unified-tunnel] StartHealthChecks: checking 0 mappings
+Stopping opencode health check...
+[opencode] Health check: stopping...

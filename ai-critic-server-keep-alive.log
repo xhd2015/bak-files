@@ -1,0 +1,52 @@
+[2026-08-10T20:22:14] Auto-detach: stdin is not a terminal (e.g. nohup); detaching from controlling terminal
+[2026-08-10T20:22:14] Keep-alive parent staying in launch session (SIGHUP ignored); server child will detach
+[2026-08-10T20:22:14] Keep-alive daemon starting (PID=1890, serverPort=23712, startupTimeout=1m0s, forever=false, childDetach=true, parentSession=false, logPath="ai-critic-server-keep-alive.log", cwd=/Users/xhd2015/.wrk/worktrees/bak-files-master-2026-07-31-sync-a-specific-workspace-between-remote-and-local, serverArgs=[])
+[2026-08-10T20:22:14] Kill-existing: terminating listeners on ports 23312 and 23712
+[2026-08-10T20:22:14] Kill-existing: sending SIGTERM to PID 23091 on port 23312
+[2026-08-10T20:22:14] Kill-existing: sending SIGTERM to PID 23102 on port 23712
+[2026-08-10T20:22:15] Kill-existing: sending SIGKILL to PID 23102 on port 23712
+[2026-08-10T20:22:15] [IsPortReachable] Step 1/2: Checking TCP connectivity to 127.0.0.1:23712 (timeout=2s)
+[2026-08-10T20:22:15] [IsPortReachable] TCP connection failed: dial tcp 127.0.0.1:23712: connect: connection refused
+[2026-08-10T20:22:15] Keep-alive management server listening on :23312
+[2026-08-10T20:22:15] Keep-alive run loop iteration 1 starting
+[2026-08-10T20:22:15] Keep-alive management server goroutine started on :23312
+[2026-08-10T20:22:15] Starting ai-critic server on port 23712 (binary: ai-critic)...
+[2026-08-10T20:22:15] [IsPortReachable] Step 1/2: Checking TCP connectivity to 127.0.0.1:23712 (timeout=2s)
+[2026-08-10T20:22:15] [IsPortReachable] TCP connection failed: dial tcp 127.0.0.1:23712: connect: connection refused
+[2026-08-10T20:22:15] Server child Setsid unavailable (failed to start server: fork/exec /Users/xhd2015/go/bin/ai-critic: operation not permitted); starting without session detach
+[2026-08-10T20:22:15] Server started (PID=2282)
+[2026-08-10T20:22:15] [keepalive] phase=server_spawn t_ms=1141 pid=2282
+[2026-08-10T20:22:20] [keepalive] phase=port_check_ok t_ms=6178 port=23712
+[2026-08-10T20:22:20] [keepalive] phase=server_ready t_ms=6178 pid=2282 waited_ms=5036
+[2026-08-10T20:22:20] Server is ready (PID=2282, port=23712)
+[2026-08-10T20:22:20] Health checks paused until 2026-08-10T20:24:20+08:00 (duration=2m0s)
+[2026-08-10T20:22:20] Health checks paused for 2m0s after server ready (extension startup)
+[2026-08-10T20:22:20] [health-check] Run started for port 23712 (PID=2282, currentBin=/Users/xhd2015/go/bin/ai-critic)
+[2026-08-10T20:22:20] [health-check] Initial next health check scheduled at 2026-08-10T20:22:30+08:00
+[2026-08-10T20:22:20] [health-check] Waiting for next event (port=23712, PID=2282, nextHealth=2026-08-10T20:22:30+08:00, consecutiveFailures=0)
+[2026-08-10T20:22:20] [health-check] Wait goroutine started for port 23712 (PID=2282)
+[2026-08-10T20:59:49] Auto-detach: stdin is not a terminal (e.g. nohup); detaching from controlling terminal
+[2026-08-10T20:59:49] Keep-alive parent staying in launch session (SIGHUP ignored); server child will detach
+[2026-08-10T20:59:49] Keep-alive daemon starting (PID=8331, serverPort=23712, startupTimeout=1m0s, forever=false, childDetach=true, parentSession=false, logPath="ai-critic-server-keep-alive.log", cwd=/Users/xhd2015/.wrk/worktrees/bak-files-master-2026-07-31-sync-a-specific-workspace-between-remote-and-local, serverArgs=[])
+[2026-08-10T20:59:49] Kill-existing: terminating listeners on ports 23312 and 23712
+[2026-08-10T20:59:49] Kill-existing: sending SIGTERM to PID 2282 on port 23712
+[2026-08-10T20:59:49] [IsPortReachable] Step 1/2: Checking TCP connectivity to 127.0.0.1:23712 (timeout=2s)
+[2026-08-10T20:59:49] [IsPortReachable] TCP connection failed: dial tcp 127.0.0.1:23712: connect: connection refused
+[2026-08-10T20:59:49] Keep-alive management server listening on :23312
+[2026-08-10T20:59:49] Keep-alive run loop iteration 1 starting
+[2026-08-10T20:59:49] Keep-alive management server goroutine started on :23312
+[2026-08-10T20:59:49] Starting ai-critic server on port 23712 (binary: ai-critic)...
+[2026-08-10T20:59:49] [IsPortReachable] Step 1/2: Checking TCP connectivity to 127.0.0.1:23712 (timeout=2s)
+[2026-08-10T20:59:49] [IsPortReachable] TCP connection failed: dial tcp 127.0.0.1:23712: connect: connection refused
+[2026-08-10T20:59:49] Server child Setsid unavailable (failed to start server: fork/exec /Applications/ai-critic-macos.app/Contents/MacOS/ai-critic: operation not permitted); starting without session detach
+[2026-08-10T20:59:49] Server started (PID=8364)
+[2026-08-10T20:59:49] [keepalive] phase=server_spawn t_ms=641 pid=8364
+[2026-08-10T20:59:50] [keepalive] phase=port_check_ok t_ms=1643 port=23712
+[2026-08-10T20:59:50] [keepalive] phase=server_ready t_ms=1643 pid=8364 waited_ms=1001
+[2026-08-10T20:59:50] Server is ready (PID=8364, port=23712)
+[2026-08-10T20:59:50] Health checks paused until 2026-08-10T21:01:50+08:00 (duration=2m0s)
+[2026-08-10T20:59:50] Health checks paused for 2m0s after server ready (extension startup)
+[2026-08-10T20:59:50] [health-check] Run started for port 23712 (PID=8364, currentBin=/Applications/ai-critic-macos.app/Contents/MacOS/ai-critic)
+[2026-08-10T20:59:50] [health-check] Initial next health check scheduled at 2026-08-10T21:00:00+08:00
+[2026-08-10T20:59:50] [health-check] Waiting for next event (port=23712, PID=8364, nextHealth=2026-08-10T21:00:00+08:00, consecutiveFailures=0)
+[2026-08-10T20:59:50] [health-check] Wait goroutine started for port 23712 (PID=8364)
